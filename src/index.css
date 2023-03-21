@@ -857,3 +857,33 @@ input::-webkit-inner-spin-button {
   margin: 0;
 }
 */
+
+.editListingImgContainer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 25px;
+}
+
+.editListingImg [type='checkbox'] {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  height: 25px;
+  width: 25px;
+}
+
+.editListingImg {
+  width: 290px;
+  height: 230px;
+  border-radius: 25px;
+  position: relative;
+}
+
+.editListingImgText {
+  position: absolute;
+  top: 5px;
+  padding: 10px;
+  font-weight: bold;
+  color: white;
+  background-color: black;
+}

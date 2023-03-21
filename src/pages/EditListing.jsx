@@ -1,30 +1,31 @@
+// Attempt to Edit Photo for EditListing.jsx File
+
 import { useState, useEffect, useRef } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import { getAuth, onAuthStateChanged } from 'firebase/auth'
 import {
   getStorage,
   ref,
   uploadBytesResumable,
   getDownloadURL,
+  deleteObject, // TODO: Import deleteObject function from firebase/storage
 } from 'firebase/storage'
-import {
-  doc,
-  updateDoc,
-  getDoc,
-  //addDoc,
-  //collection,
-  serverTimestamp,
-} from 'firebase/firestore'
+
+import { serverTimestamp, doc, getDoc, updateDoc } from 'firebase/firestore'
 import { db } from '../firebase.config'
-import { useNavigate, useParams } from 'react-router-dom'
+
 import { toast } from 'react-toastify'
 import { v4 as uuidv4 } from 'uuid'
 import Spinner from '../components/Spinner'
+import { ReactComponent as DeleteIcon } from '../assets/svg/deleteIcon.svg'
+import { setOptions } from 'leaflet'
 
 function EditListing() {
   // eslint-disable-next-line
   const [geolocationEnabled, setGeolocationEnabled] = useState(true)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [listing, setListing] = useState(false)
+  const [imagesToRemove, setImagesToRemove] = useState([]) // TODO: instantiate state as an array for Images the user wants to delete
   const [formData, setFormData] = useState({
     type: 'rent',
     name: '',
@@ -41,6 +42,7 @@ function EditListing() {
     longitude: 0,
   })
 
+  // Unpack FormData
   const {
     type,
     name,
@@ -57,42 +59,38 @@ function EditListing() {
     longitude,
   } = formData
 
+  const params = useParams()
   const auth = getAuth()
   const navigate = useNavigate()
-  const params = useParams()
   const isMounted = useRef(true)
 
-  // Redirect if listing is not users
+  // Redirect if listing is not user's
   useEffect(() => {
     if (listing && listing.userRef !== auth.currentUser.uid) {
-      toast.error('You cannot edit that listing')
+      toast.error("You're not authorized to edit that listing")
       navigate('/')
     }
   })
 
   // Fetch listing to edit
   useEffect(() => {
-    setLoading(true)
     const fetchListing = async () => {
       const docRef = doc(db, 'listings', params.listingId)
-      //console.log(docRef)
+      console.log(docRef)
       const docSnap = await getDoc(docRef)
-      //console.log(docSnap.data())
+      console.log(docSnap)
       if (docSnap.exists()) {
-        console.log(docSnap.data())
         setListing(docSnap.data())
-        setFormData({
-          ...docSnap.data(),
-          address: docSnap.data().location,
-        })
+        setFormData({ ...docSnap.data(), address: docSnap.data().location })
         setLoading(false)
       } else {
         navigate('/')
         toast.error('Listing does not exist')
       }
     }
+
     fetchListing()
-  }, [navigate, params.listingId])
+  }, [params.listingId, navigate])
 
   // Sets userRef to logged in user
   useEffect(() => {
@@ -112,44 +110,55 @@ function EditListing() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMounted])
 
+  //! TODO: Apply Restriction on Geocode and Firebase API keys specific to this website after deployment
+  //! MUST ENABLE GEOCODE API FROM YOUR GOOGLE CONSOLE
+  // 1. Go to https://www.console.cloud.google.com
+  // 2. Select "API & Services" from the Dropdown
+  // 3. Click Enable APIs & Services (If geocode not yet enabled)
+  // 4. Search for Geocoding API --> Select Geocoding API --> Click Enable
+
   const onSubmit = async (e) => {
     e.preventDefault()
 
-    setLoading(true)
-    //console.log(formData)
+    // Verify that discounted price is lower than regular
     if (discountedPrice >= regularPrice) {
       setLoading(false)
-      toast.error('Discounted price needs to be less than regular price')
+      toast.error('Discounted Price must be lower than Regular Price')
       return
     }
 
-    if (images.length > 6) {
-      setLoading(false)
-      toast.error('Max 6 images')
-      return
-    }
+    // // Verify Images are 6 or less
+    // if (images?.length > 6) {
+    //   setLoading(false);
+    //   toast.error('Max 6 Images');
+    // }
 
+    // GEOCODING
     let geolocation = {}
     let location
 
     if (geolocationEnabled) {
+      console.log('Yay Geolocation is enabled!')
       const response = await fetch(
         `https://maps.googleapis.com/maps/api/geocode/json?address=${address}&key=${process.env.REACT_APP_GEOCODE_API_KEY}`
       )
 
       const data = await response.json()
-      //console.log(data)
+      console.log(data)
 
+      // Set geolocation if returned
       geolocation.lat = data.results[0]?.geometry.location.lat ?? 0
       geolocation.lng = data.results[0]?.geometry.location.lng ?? 0
+      console.log(geolocation.lat)
+      console.log(geolocation.lng)
 
+      // If data returned results, set the address to formatted address
       location =
         data.status === 'ZERO_RESULTS'
           ? undefined
           : data.results[0]?.formatted_address
 
-      //console.log(location)
-
+      // Throw error if location wasn't returned
       if (location === undefined || location.includes('undefined')) {
         setLoading(false)
         toast.error('Please enter a correct address')
@@ -164,15 +173,25 @@ function EditListing() {
     const storeImage = async (image) => {
       return new Promise((resolve, reject) => {
         const storage = getStorage()
+        console.log(storage)
         const fileName = `${auth.currentUser.uid}-${image.name}-${uuidv4()}`
+        console.log(fileName)
 
+        // create storage reference --> pass in storage + path + filename
         const storageRef = ref(storage, 'images/' + fileName)
-
+        console.log(storageRef)
+        // Upload the file metadata
         const uploadTask = uploadBytesResumable(storageRef, image)
-
+        console.log(uploadTask)
+        // Register three observers:
+        // 1. 'state_changed' observer, called any time the state changes
+        // 2. Error observer, called on failure
+        // 3. Completion observer, called on successful completion
         uploadTask.on(
           'state_changed',
           (snapshot) => {
+            // Observe state change events such as progress, pause, and resume
+            // Get task progress, including the number of bytes uploaded and the total number of bytes to be uploaded
             const progress =
               (snapshot.bytesTransferred / snapshot.totalBytes) * 100
             console.log('Upload is ' + progress + '% done')
@@ -188,11 +207,12 @@ function EditListing() {
             }
           },
           (error) => {
+            console.log(error)
             reject(error)
           },
           () => {
             // Handle successful uploads on complete
-            // For instance, get the download URL: https://firebasestorage.googleapis.com/...
+            // For instance, return the download URL: https://firebasestorage.googleapis.com/...
             getDownloadURL(uploadTask.snapshot.ref).then((downloadURL) => {
               resolve(downloadURL)
             })
@@ -201,33 +221,119 @@ function EditListing() {
       })
     }
 
-    const imgUrls = await Promise.all(
-      [...images].map((image) => storeImage(image))
-    ).catch(() => {
+    console.log(listing.imgUrls)
+    // TODO: Throw an error if new image TOTAL is not 6 or less
+    //const availableImageStorage = 6 - listing.imgUrls.length + imagesToRemove.
+    const availableImageStorage =
+      6 - listing.imgUrls.length + imagesToRemove.length
+    // Return an error only if new images were added AND the total files exceeds 6
+    if (images && images.length > availableImageStorage) {
       setLoading(false)
-      toast.error('Images not uploaded')
+      toast.error(
+        'Image Upload failed - Too many total images for this listing'
+      )
       return
+    }
+
+    // TODO: IF new images were uploaded, Store the returned imgUrls in a new array
+    let newImgUrls
+    if (images) {
+      newImgUrls = await Promise.all(
+        [...images].map((image) => storeImage(image))
+      ).catch(() => {
+        setLoading(false)
+        toast.error('Images not uploaded')
+        return
+      })
+    }
+
+    // TODO: Function to Delete an Image from Storage from Storage
+    const deleteImage = async (imgUrl) => {
+      console.log('Yay deleteImage function is fired')
+      // Split Url to get the filename in the middle
+      let fileName = imgUrl.split('images%2F')
+      console.log(fileName)
+      fileName = fileName[1].split('?alt')
+      console.log(fileName)
+      fileName = fileName[0]
+      console.log(fileName)
+
+      const storage = getStorage()
+      console.log(storage)
+
+      // Create a reference to the file to delete
+      const imgRef = ref(storage, `images/${fileName}`)
+      console.log(imgRef)
+
+      // Returns a promise
+      return deleteObject(imgRef)
+      /*
+      deleteObject(imgRef)
+        .then(() => {
+          // File deleted successfully
+          toast.success('Image was successfully removed from storage')
+        })
+        .catch((error) => {
+          // Uh-oh, an error occurred!
+          console.log(error)
+          toast.error('Deletion failed')
+          setLoading(false)
+        })
+        */
+    }
+
+    //TODO: Delete each image in imagesToRemove from storage
+    imagesToRemove.forEach(async (imgUrl) => {
+      console.log('Yay imagesToRemove function is fired')
+      console.log(imgUrl)
+      //console.log(imgRef)
+
+      await deleteImage(imgUrl) // Handle the returned promise
+        .then(() => {
+          toast.success('Image was successfully removed from storage')
+        })
+        .catch((error) => {
+          console.log(error)
+          toast.error('Deletion failed')
+          setLoading(false)
+        })
     })
 
-    //console.log(imgUrls)
+    //TODO: Remove all imagesToRemove from current imgUrls for this listing
+    const remainingListingImages = listing.imgUrls.filter(
+      (val) => !imagesToRemove.includes(val)
+    )
+    console.log(remainingListingImages)
 
+    //TODO: Merge imgUrls with newImgUrls (if defined) --> Then Delete newImgUrls
+    let mergedImgUrls
+    console.log(mergedImgUrls)
+    if (newImgUrls) {
+      mergedImgUrls = [...remainingListingImages, ...newImgUrls]
+    } else {
+      mergedImgUrls = [...remainingListingImages]
+    }
+
+    // Create a separate copy of the formData, then add/delete fields as needed to match collection keys
     const formDataCopy = {
       ...formData,
-      imgUrls,
+      imgUrls: mergedImgUrls,
       geolocation,
       timestamp: serverTimestamp(),
     }
 
+    // Removes any leading zeros from price
+    if (formDataCopy.discountedPrice) {
+      formDataCopy.discountedPrice = formData.discountedPrice.toString()
+    }
+    formDataCopy.regularPrice = formData.regularPrice.toString()
+
     formDataCopy.location = address
     delete formDataCopy.images
     delete formDataCopy.address
-    //location && (formDataCopy.location = location)
-    !formDataCopy.offer && delete formDataCopy.discountedPrice
-    //console.log(formDataCopy)
+    !formDataCopy.offer && delete formDataCopy.discountedPrice // Remove discountedPrice if no offer
 
-    // Update listing
-    //const docRef = await addDoc(collection(db, 'listings'), formDataCopy)
-    //console.log(docRef)
+    // Update in firestore
     const docRef = doc(db, 'listings', params.listingId)
     await updateDoc(docRef, formDataCopy)
     setLoading(false)
@@ -235,14 +341,17 @@ function EditListing() {
     navigate(`/category/${formDataCopy.type}/${docRef.id}`)
   }
 
+  // Form Data Changed
   const onMutate = (e) => {
-    let boolean = null
+    // let boolean = null;
+    let newValue = e.target.value
 
+    // Edge Cases to prevent booleans from converting to strings
     if (e.target.value === 'true') {
-      boolean = true
+      newValue = true
     }
     if (e.target.value === 'false') {
-      boolean = false
+      newValue = false
     }
 
     // Files
@@ -253,12 +362,29 @@ function EditListing() {
       }))
     }
 
-    // Text/Booleans/Numbers
+    // All other
     if (!e.target.files) {
       setFormData((prevState) => ({
         ...prevState,
-        [e.target.id]: boolean ?? e.target.value,
+        [e.target.id]: newValue,
       }))
+    }
+  }
+
+  // TODO: handleChange on image checkboxes
+  const handleChange = (e) => {
+    if (e.target.checked) {
+      // Case 1 : The user checks the box
+      console.log(imagesToRemove)
+      console.log(e.target.value)
+      setImagesToRemove([...imagesToRemove, e.target.value])
+    } else {
+      // Case 2  : The user unchecks the box
+      setImagesToRemove((current) =>
+        current.filter((url) => {
+          return url !== e.target.value
+        })
+      )
     }
   }
 
@@ -481,10 +607,46 @@ function EditListing() {
             </>
           )}
 
-          <label className='formLabel'>Images</label>
-          <p className='imagesInfo'>
-            The first image will be the cover (max 6).
+          {/* TODO: Display Current Images (Noting Cover) with Delete Buttons --> Then display "Add Image" Option */}
+          <label className='formLabel'>Listing Images</label>
+          <p style={{ paddingLeft: '10px', fontSize: '0.8rem' }}>
+            DELETE: Check the box of each image you wish to delete
           </p>
+          <div className='editListingImgContainer'>
+            {listing?.imgUrls &&
+              listing.imgUrls.map((img, index) => (
+                <div
+                  key={index}
+                  className='editListingImg'
+                  style={{
+                    background: `url(${img}) center no-repeat`,
+                    backgroundSize: 'cover',
+                  }}
+                >
+                  {index === 0 && <p className='editListingImgText'>Cover</p>}
+
+                  <input
+                    type='checkbox'
+                    id='imageDelete'
+                    name='imageDelete'
+                    value={img}
+                    onChange={handleChange}
+                  />
+                </div>
+              ))}
+          </div>
+          {/* Displays the number of remaining spots available after checked images are deleted */}
+          <p style={{ paddingLeft: '10px', fontSize: '0.8rem' }}>
+            ADD: Choose files to add. (
+            {listing?.imgUrls &&
+              imagesToRemove &&
+              ` ${
+                6 - listing.imgUrls.length + imagesToRemove.length
+              } image slots remaining`}{' '}
+            - Max 6 total )
+          </p>
+          {/*  */}
+
           <input
             className='formInputFile'
             type='file'
@@ -493,10 +655,9 @@ function EditListing() {
             max='6'
             accept='.jpg,.png,.jpeg'
             multiple
-            required
           />
           <button type='submit' className='primaryButton createListingButton'>
-            Edit Listing
+            Update Listing
           </button>
         </form>
       </main>
